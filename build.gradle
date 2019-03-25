@@ -39,5 +39,7 @@ dependencies {
     compile "org.jetbrains:kotlin-css-jvm:1.0.0-pre.31-kotlin-1.2.41"
     compile "io.ktor:ktor-freemarker:$ktor_version"
 
+    compile 'javax.mail:mail:1.4.7'
+
     testCompile "io.ktor:ktor-server-tests:$ktor_version"
 }
