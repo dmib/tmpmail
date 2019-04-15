@@ -74,7 +74,8 @@
     </div>
     <div id="content_area">
         <div id="mail_address">
-            ${tempMail.mail_address}
+            ${tempMail.email}
+            <button onclick="window.location.href='/mails'" type="button">Refresh</button>
         </div>
         <div id="banner">
             <table id="mails">

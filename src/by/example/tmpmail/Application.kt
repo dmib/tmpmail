@@ -1,5 +1,9 @@
 package by.example
 
+import by.example.tmpmail.data.Mail
+import by.example.tmpmail.data.MailAddress
+import com.github.kittinunf.fuel.Fuel
+import com.google.gson.Gson
 import freemarker.cache.ClassTemplateLoader
 import io.ktor.application.Application
 import io.ktor.application.call
@@ -15,15 +19,17 @@ import org.slf4j.LoggerFactory
 import java.util.*
 import javax.mail.Folder
 import javax.mail.Session
-import kotlin.collections.set
 
 
 private const val STRING_MAIL_LENGTH = 7
 private const val STRING_MAIL_PASSWORD = 20
 
-private const val SETUP_PATH = "setup_path"
 private const val DOMAIN = "domain"
+private const val PORT = "port"
 private const val COOKIE_MAIL = "mail"
+
+private const val LOGIN = "login"
+private const val PASSWORD = "password"
 
 val logger = LoggerFactory.getLogger("ten-minutes-mail")
 
@@ -45,21 +51,21 @@ fun Application.module(testing: Boolean = false) {
     routing {
         get("/") {
             val tempMail = call.sessions.get<MailAddress>() ?: generateTempMailAddress()
+            call.sessions.set(tempMail)
             call.respond(
                 FreeMarkerContent(
                     "index.ftl",
-                    mapOf("mails" to checkEmail(tempMail.mailAddress, tempMail.mailPassword), "tempMail" to tempMail),
+                    mapOf("mails" to checkEmail(tempMail.email, tempMail.passwordPlaintext), "tempMail" to tempMail),
                     "e"
                 )
             )
-            call.sessions.set(tempMail)
         }
         get("/mails") {
             val tempMail = call.sessions.get<MailAddress>() ?: error("No mail found or expired")
             call.respond(
                 FreeMarkerContent(
                     "index.ftl",
-                    mapOf("mails" to checkEmail(tempMail.mailAddress, tempMail.mailPassword), "tempMail" to tempMail),
+                    mapOf("mails" to checkEmail(tempMail.email, tempMail.passwordPlaintext), "tempMail" to tempMail),
                     "e"
                 )
             )
@@ -67,23 +73,19 @@ fun Application.module(testing: Boolean = false) {
     }
 }
 
-class User(val userName: String, val email: String)
-
-class Mail(val subject: String, val message: String, val sender: String, val date: String)
-
-class MailAddress(val mailAddress: String, val mailPassword: String)
-
-
 fun generateTempMailAddress(): MailAddress {
-    val mail = "${RandomStringUtils.randomAlphabetic(STRING_MAIL_LENGTH)}@${System.getProperty(DOMAIN)}"
+    val mail = "${RandomStringUtils.randomAlphabetic(STRING_MAIL_LENGTH).toLowerCase()}@${System.getProperty(DOMAIN)}"
     val mailPassword = RandomStringUtils.randomAlphabetic(STRING_MAIL_PASSWORD)
+
+
+    Fuel.post("http://${System.getProperty(DOMAIN)}:${System.getProperty(PORT)}/admin/api/v1/boxes")
+        .header(Pair("Content-Type", "application/json"))
+        .body(Gson().toJson(MailAddress(mail, mailPassword)).toString())
+        .authenticate("${System.getProperty(LOGIN)}@${System.getProperty(DOMAIN)}", "${System.getProperty(PASSWORD)}")
+        .response()
+
     logger.info("User generate a new mail with login $mail and password $mailPassword")
 
-    val output = Runtime.getRuntime()
-        .exec(arrayOf("bash", "-c", "${System.getProperty(SETUP_PATH)} email add $mail $mailPassword")).waitFor()
-    if (output == 0) {
-        logger.info("Mail for user $mail generated")
-    }
     return MailAddress(mail, mailPassword)
 }
 
@@ -91,9 +93,11 @@ fun checkEmail(user: String, password: String): List<Mail> {
 
     val properties = Properties()
 
-    properties["mail.pop3.port"] = "110"
-    properties["mail.pop3.socketFactory.fallback"] = "false"
-    properties["mail.pop3.socketFactory.port"] = "110"
+    properties.setProperty("mail.pop3.socketFactory.class", "javax.net.ssl.SSLSocketFactory")
+    properties.setProperty("mail.pop3.socketFactory.fallback", "false")
+    properties.setProperty("mail.pop3.port", "995")
+    properties.setProperty("mail.pop3.socketFactory.port", "995")
+
 
     val store = Session.getInstance(properties).getStore("pop3")
 
@@ -103,10 +107,18 @@ fun checkEmail(user: String, password: String): List<Mail> {
     val emailFolder = store.getFolder("Inbox")
     emailFolder.open(Folder.READ_ONLY)
 
-    val messages = emailFolder.messages
+    val messages = emailFolder.messages.map {
+        Mail(
+            it.subject,
+            it.content.toString(),
+            it.from[0].toString(),
+            it.sentDate.toString()
+        )
+    }
+
 
     emailFolder.close(true)
     store.close()
 
-    return messages.map { Mail(it.subject, it.content.toString(), it.from[0].toString(), it.sentDate.toString()) }
+    return messages
 }
